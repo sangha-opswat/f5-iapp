@@ -129,8 +129,6 @@ optional (icap_pool.pool_to_use == "/#create_new#") {
             append choices "[iapp::get_items ltm monitor inband]\n"
             append choices "[iapp::get_items ltm monitor icmp]\n"
             append choices "[iapp::get_items ltm monitor gateway-icmp]\n"
-            append choices "[iapp::get_items ltm monitor http]\n"
-            append choices "[iapp::get_items ltm monitor https]\n"
             return $choices
         }
         optional (options.inline_help == "Yes") {
