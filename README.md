@@ -8,6 +8,6 @@ You can find instructions about how to use this template [here](https://onlinehe
 
 For specific product questions or issues please contact [support](https://www.opswat.com/support).
 
-## Licence
+## License
 
 [MIT](https://github.com/OPSWAT/f5-iapp/blob/master/LICENSE)
