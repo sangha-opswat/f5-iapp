@@ -164,8 +164,8 @@ section icap_vs {
     }
 }
 
-section icap_irule {
-    optional (options.default_names == "No" && icap_vs.icap_type == "/#on_cloud#") {
+optional (options.default_names == "No" && icap_vs.icap_type == "/#on_cloud#") {
+    section icap_irule {
         string name default "Metadefender_ICAP_Cloud_IRule" display "xlarge" required
     }
 }
