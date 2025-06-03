@@ -1,0 +1,333 @@
+#TMSH-VERSION: 17.1.1.3
+
+cli admin-partitions {
+    update-partition Common
+}
+sys application template /Common/opswat_metadefender_icap {
+    actions {
+        definition {
+            html-help {
+                <p><strong>OPSWAT Metadefender ICAP Server iApp template</strong></p>
+
+<p>This is a template for making the process of creating ICAP related elements (nodes, pool, internal virtual server, profiles) easier in one place. The newly created request and response adapt profiles can be set for standard virtual servers so they can make use of OPSWAT Metadefender ICAP Server.</p>
+<p>How to use this template (you can also turn on inline helps under the template options):</p>
+<ul>
+    <li>Create a new pool where you can add your Metadefender ICAP Servers or choose an existing one</li>
+    <li>Select the service down action for the request and response adapt profiles</li>
+    <li>Click Finished</li>
+    <li>Set the newly created request and response adapt profiles for your standard virtual servers under their advanced configuration to turn on ICAP for them.</li>
+    <li>To change the default element names select "No" for "Do you want to use default names?" under Template options.</li>
+</ul>
+            }
+            implementation {
+                package require iapp 1.1.1
+
+iapp::template start
+
+#Declare variable 
+set req_sda $::icap_adapts__req_sda
+set resp_sda $::icap_adapts__resp_sda
+#set irule_name $::irule__name
+set profile_name "Metadefender_ICAP_Profile"
+set vs_name "Metadefender_ICAP_VS"
+set req_name "Metadefender_ICAP_Request"
+set resp_name "Metadefender_ICAP_Response"
+set node_name "Metadefender_ICAP_Node"
+#Set the pool name based on if we create a new one (and if we use default names) or if we use an existing one. If we create a new one we also set monitor
+#Default option is on-prem
+if { [iapp::is ::icap_pool__pool_to_use "/#create_new#"] } {
+    set pool_name [expr {[iapp::is ::options__default_names "No"] ? $::icap_pool__name : "Metadefender_ICAP_Pool"}]
+    set monitor [expr {[iapp::is ::icap_pool_monitor__monitor "/#none#"] ? "none" : $::icap_pool_monitor__monitor}]
+} elseif { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } { #The second option is on-cloud
+    set pool_name [expr {[iapp::is ::options__default_names "No"] ? $::icap_pool__cloud_name : "Metadefender_ICAP_Cloud_Pool"}]
+    set monitor [expr {[iapp::is ::icap_cloud_pool_monitor__monitor "/#none#"] ? "none" : $::icap_cloud_pool_monitor__monitor}]
+}
+else { #The pool is existing on them system
+    set pool_name $::icap_pool__pool_to_use
+}
+
+#Set element names based on if we use the default ones or custom ones from the user
+if { [iapp::is ::options__default_names "No"] } {
+    set profile_name \"$::icap_profile__name\"
+    #If they use the ICAP on-cloud
+    if { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
+        set vs_name \"$::icap_vs__cloud_name\"
+    } else {
+        set vs_name \"$::icap_vs__name\"
+    }
+    set req_name \"$::icap_adapts__req_name\"
+    set resp_name \"$::icap_adapts__resp_name\"
+}
+# Function to validate IPv4 address
+proc is_valid_ipv4 {ip} {
+    if {[regexp {^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$} $ip -> a b c d]} {
+        if {$a <= 255 && $b <= 255 && $c <= 255 && $d <= 255} {
+            return 1
+        }
+    }
+    return 0
+}
+iapp::conf create ltm profile icap $profile_name defaults-from icap preview-length 0 uri \"icap://\${SERVER_IP}:\${SERVER_PORT}/metadefender_icap\"
+if { [iapp::is ::icap_pool__pool_to_use "/#create_new#"] } {
+    iapp::conf create ltm pool $pool_name [iapp::pool_members $::icap_pool__members] monitor $monitor
+} elseif { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
+    set cloud_apikey $::icap_vs__cloud_apikey
+    set vs_name $::icap_vs__cloud_name
+    iapp::conf create ltm profile http mdicapsrv_http_profile [subst {{
+        description "Custom HTTP Profile with Header Insertion"
+        defaults-from http
+        insert-xforwarded-for enabled
+        header-insert "X-MDCloud-APIKey: $cloud_apikey"
+    }
+}]
+    #iapp::conf create ltm rule $irule_name [subst {
+    #when ICAP_REQUEST {
+    #    ICAP::header add X-MDCloud-APIKey "$cloud_apikey"
+    #}
+#}]
+    # Validate icap_pool__cloud_addr
+    if {![info exists ::icap_pool__cloud_addr] || $::icap_pool__cloud_addr eq ""} {
+        error "Error: Cloud address is not set. Please provide a valid IPv4 or FQDN."
+    }
+
+    set is_ipv4 [is_valid_ipv4 $::icap_pool__cloud_addr]
+    if {$is_ipv4} {
+        # Handle as IPv4
+        iapp::conf create ltm pool $pool_name members add \{ $::icap_pool__cloud_addr:$::icap_pool__cloud_port \} monitor $monitor
+    } else {
+        # Handle as FQDN
+        iapp::conf create ltm node $node_name fqdn \{ name $::icap_pool__cloud_addr autopopulate enabled address-family ipv4 \}
+        iapp::conf create ltm pool $pool_name members add \{ $node_name:$::icap_pool__cloud_port \} monitor $monitor
+    }
+}
+iapp::conf create ltm virtual $vs_name internal profiles add \{tcp \{\} $profile_name \{\} serverssl \{\} \} pool $pool_name
+#if { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
+#    iapp::conf modify ltm virtual $vs_name \{ rules \{$irule_name\} \}
+#}
+iapp::conf create ltm profile request-adapt $req_name defaults-from requestadapt preview-size 0 internal-virtual $vs_name service-down-action $req_sda
+iapp::conf create ltm profile response-adapt $resp_name defaults-from responseadapt preview-size 0 internal-virtual $vs_name service-down-action $resp_sda
+
+iapp::template stop
+            }
+            macro {
+            }
+            presentation {
+                include "/Common/f5.apl_common"
+
+define choice servicedownaction { "Ignore" => "ignore", "Reset" => "reset", "Drop" => "drop"}
+
+section introduction {
+    message intro_str "This is a template for making the process of creating ICAP related elements (nodes, pool, internal virtual server, profiles) easier in one place. The newly created request and response adapt profiles can be set for standard virtual servers so they can make use of OPSWAT Metadefender ICAP Server."
+}
+
+section options {
+    noyes inline_help
+    optional (options.inline_help == "Yes") {
+        message inlinehelp_help
+    }
+    yesno default_names
+    optional (options.inline_help == "Yes") {
+        message defaultnames_help
+    }
+}
+
+optional (options.default_names == "No") {
+    section icap_profile {
+        string name default "Metadefender_ICAP_Profile" display "xlarge" required
+        optional (options.inline_help == "Yes") {
+            message profile_help
+        }
+    }
+}
+
+section icap_vs {
+    choice icap_type display "xxlarge" default "/#on_prem#" tcl {
+        package require iapp 1.1.1
+        return "Use the ICAP On-prem\t/#on_prem#\nUse the ICAP Cloud\t/#on_cloud#"
+    }
+    optional (icap_type == "/#on_cloud#") {
+        string cloud_name default "Metadefender_ICAP_Cloud_VS" display "xlarge" required
+        string cloud_apikey display "large" required default ""
+    }
+    optional (icap_type == "/#on_prem#") {
+        string name default "Metadefender_ICAP_VS" display "xlarge" required
+    }
+    optional (options.inline_help == "Yes") {
+        message vs_help
+    }
+}
+
+#section irule {
+#    string name default "Metadefender_ICAP_Cloud_IRule" display "xlarge" required
+#}
+
+section icap_pool {
+    choice pool_to_use display "xxlarge" default "/#create_new#" tcl {
+        package require iapp 1.1.1
+        return "Create a new pool\t/#create_new#\nUse the ICAP Cloud\t/#use_icap_cloud#\n[iapp::get_items ltm pool]"
+    }
+    optional (options.inline_help == "Yes") {
+        message pool_help
+    }
+    optional (pool_to_use == "/#create_new#") {
+        optional (options.default_names == "No") {
+            string name default "Metadefender_ICAP_Pool" display "xlarge" required
+        }
+        table members {
+            editchoice addr display "large" tcl {
+                package require iapp 1.1.1
+                return [iapp::get_items ltm node]
+            }
+            string port display "small" required default "1344" validator "PortNumber"
+            string connection_limit display "small" required default "0" validator "NonNegativeNumber"
+        }
+        optional (options.inline_help == "Yes") {
+            message new_pool_help
+        }
+    }
+    optional (pool_to_use == "/#use_icap_cloud#") {
+        optional (options.default_names == "No") {
+            string cloud_name default "Metadefender_ICAP_Cloud_Pool" display "xlarge" required
+        }
+        string cloud_addr display "large" default "icap-test.metadefender.com"
+        string cloud_port display "small" required default "11344" validator "PortNumber"
+        string cloud_connection_limit display "small" required default "0" validator "NonNegativeNumber"
+        optional (options.inline_help == "Yes") {
+            message new_cloud_pool_help
+        }
+    }
+}
+
+optional (icap_pool.pool_to_use == "/#create_new#" ) {
+    section icap_pool_monitor {
+        choice monitor display "xxlarge" default "/#create_new#" tcl {
+            package require iapp 1.1.1
+            set choices "Do not use monitor\t/#none#\n"
+            append choices "[iapp::get_items ltm monitor tcp]\n"
+            append choices "[iapp::get_items ltm monitor tcp-half-open]\n"
+            append choices "[iapp::get_items ltm monitor udp]\n"
+            append choices "[iapp::get_items ltm monitor inband]\n"
+            append choices "[iapp::get_items ltm monitor icmp]\n"
+            append choices "[iapp::get_items ltm monitor gateway-icmp]\n"
+            return $choices
+        }
+        optional (options.inline_help == "Yes") {
+            message monitor_help
+        }
+    }
+}
+
+optional (icap_pool.pool_to_use == "/#use_icap_cloud#" ) {
+    section icap_cloud_pool_monitor {
+        choice monitor display "xxlarge" default "/#use_icap_cloud#" tcl {
+            package require iapp 1.1.1
+            set choices "Do not use monitor\t/#none#\n"
+            append choices "[iapp::get_items ltm monitor tcp]\n"
+            append choices "[iapp::get_items ltm monitor tcp-half-open]\n"
+            append choices "[iapp::get_items ltm monitor udp]\n"
+            append choices "[iapp::get_items ltm monitor inband]\n"
+            append choices "[iapp::get_items ltm monitor icmp]\n"
+            append choices "[iapp::get_items ltm monitor gateway-icmp]\n"
+            return $choices
+        }
+        optional (options.inline_help == "Yes") {
+            message monitor_help
+        }
+    }
+}
+
+section icap_adapts {
+    optional (options.default_names == "No") {
+        string req_name default "Metadefender_ICAP_Request" display "xlarge" required
+        optional (options.inline_help == "Yes") {
+            message profile_help_req
+        }
+    }
+    servicedownaction req_sda
+    optional (options.default_names == "No") {
+        string resp_name default "Metadefender_ICAP_Response" display "xlarge" required
+        optional (options.inline_help == "Yes") {
+            message profile_help_resp
+        }
+    }
+    servicedownaction resp_sda
+    optional (options.inline_help == "Yes") {
+        message profile_help
+        message profile_help_ignore
+        message profile_help_reset
+        message profile_help_drop
+    }
+}
+
+text {
+    introduction "Introduction"
+    introduction.intro_str "What is this template for"
+
+    options "Template options"
+    options.inline_help "Do you want to see inline help?"
+    options.default_names "Do you want to use default names?"
+    options.inlinehelp_help "" "Inline help is available to provide contextual descriptions to aid in the completion of this configuration. Select to show or hide the inline help in this template. Important notes and warnings are always visible, no matter which selection you make here."
+    options.defaultnames_help "" "Use the default names for the elements to be created (profiles, virtual server, pool). Select 'No' to edit element names."
+
+    icap_profile "Create ICAP profile"
+    icap_profile.name "Name of the new ICAP profile"
+    icap_profile.profile_help "" "This profile will be set for the new ICAP internal virtual server."
+
+    icap_pool "ICAP pool"
+    icap_pool.name "Name of the new ICAP pool"
+    icap_pool.pool_to_use "Do you want to create a new pool or use an existing one?"
+    icap_pool.members "Which ICAP servers should be included in this pool?"
+    icap_pool.members.addr "Node/IP address"
+    icap_pool.members.port "Port"
+    icap_pool.members.connection_limit "Connection limit"
+    icap_pool.pool_help "" "Please select if you want to create a new pool or use an existing one. This pool will be set for the new ICAP internal virtual server."
+    icap_pool.new_pool_help "" "Add nodes for the new pool either by selecting existing ones or create new ones by typing the nodes' IP addresses. These nodes should have a running Metadefender ICAP Server on the given ports."
+    icap_pool.cloud_addr "Node/IP address"
+    icap_pool.cloud_port "Port"
+    icap_pool.cloud_connection_limit "Connection limit"
+	icap_pool.new_cloud_pool_help "" "Add nodes for the new pool either by selecting existing ones or create new ones by typing the nodes' IP addresses. These nodes should have a running Metadefender ICAP Server on the given ports."
+
+    icap_pool_monitor "Pool monitor"
+    icap_pool_monitor.monitor "Select a monitor for the pool"
+    icap_pool_monitor.monitor_help "" "Setting a monitor for the pool can give you information about the health of the pool. If you are not interested in that information you can also choose to do not use any monitor at all."
+
+    icap_cloud_pool_monitor "Cloud Pool monitor"
+    icap_cloud_pool_monitor.monitor "Select a monitor for the pool"
+    icap_cloud_pool_monitor.monitor_help "" "Setting a monitor for the pool can give you information about the health of the pool. If you are not interested in that information you can also choose to do not use any monitor at all."
+
+    icap_vs "Create an internal virtual server for ICAP"
+    icap_vs.name "Name of the new ICAP internal virtual server"
+    icap_vs.vs_help "" "This virtual server will be set for the new request and response adapt profiles."
+    icap_vs.cloud_apikey "Set the APIKEY for the MD ICAP Server on Cloud"
+    icap_vs.icap_type "Choose the option for ICAP"
+    icap_vs.cloud_name "Name of the new ICAP internal virtual server"
+
+    #irule "Create an iRule to set the APIKEY for ICAP on Cloud"
+    #irule.name "Name of the iRule"
+
+    icap_adapts "Create request and response adapt profiles"
+    icap_adapts.req_name "Name of the new request adapt profile"
+    icap_adapts.req_sda "Service down action for request adapt profile"
+    icap_adapts.resp_name "Name of the new response adapt profile"
+    icap_adapts.resp_sda "Service down action for response adapt profile"
+    icap_adapts.profile_help "" "Please select the service down action for both request and response adapt profiles. You can find the description of the actions below."
+    icap_adapts.profile_help_req "" "This profile can be set as the request adapt profile for standard virtual servers."
+    icap_adapts.profile_help_resp "" "This profile can be set as the response adapt profile for standard virtual servers."
+    icap_adapts.profile_help_ignore "Ignore" "BIG-IP will ignore the error and send the unmodified HTTP request/response to an HTTP server in the HTTP server pool."
+    icap_adapts.profile_help_reset "Reset" "BIG-IP will drop the connection"
+    icap_adapts.profile_help_drop "Drop" "BIG-IP will reset the connection"
+}
+            }
+            role-acl none
+            run-as none
+        }
+    }
+    description none
+    ignore-verification false
+    requires-bigip-version-max none
+    requires-bigip-version-min none
+    requires-modules { ltm }
+    signing-key none
+    tmpl-checksum none
+    tmpl-signature none
+}
