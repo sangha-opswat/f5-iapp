@@ -92,7 +92,12 @@ if { [iapp::is ::icap_pool__pool_to_use "/#create_new#"] } {
         iapp::conf create ltm pool $pool_name members add \{ $node_name:$::icap_pool__cloud_port \} monitor $monitor
     }
 }
-iapp::conf create ltm virtual $vs_name internal profiles add \{tcp \{\} $profile_name \{\} serverssl \{\} \} pool $pool_name
+
+if { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
+    iapp::conf create ltm virtual $vs_name internal profiles add \{tcp \{\} $profile_name \{\} serverssl \{\} \} pool $pool_name
+} else {
+    iapp::conf create ltm virtual $vs_name internal profiles add \{tcp \{\} $profile_name \{\} \} pool $pool_name
+}
 if { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
     iapp::conf modify ltm virtual $vs_name \{ rules \{$irule_name\} \}
 }
@@ -181,7 +186,7 @@ section icap_pool {
         optional (options.default_names == "No") {
             string cloud_name default "Metadefender_ICAP_Cloud_Pool" display "xlarge" required
         }
-        string cloud_addr display "large" default "icap-test.metadefender.com"
+        string cloud_addr display "large" default "icap.metadefender.com"
         string cloud_port display "small" required default "11344" validator "PortNumber"
         string cloud_connection_limit display "small" required default "0" validator "NonNegativeNumber"
         optional (options.inline_help == "Yes") {
