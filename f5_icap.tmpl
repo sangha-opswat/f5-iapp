@@ -49,15 +49,17 @@ else { #The pool is existing on them system
 #Set element names based on if we use the default ones or custom ones from the user
 if { [iapp::is ::options__default_names "No"] } {
     set profile_name \"$::icap_profile__name\"
-    #If they use the ICAP on-cloud
-    if { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
-        set vs_name \"$::icap_vs__cloud_name\"
-    } else {
-        set vs_name \"$::icap_vs__name\"
-    }
     set req_name \"$::icap_adapts__req_name\"
     set resp_name \"$::icap_adapts__resp_name\"
 }
+
+# Set vs name base on icap type
+if { [iapp::is ::icap_vs__icap_type "/#on_cloud#"] } {
+    set vs_name $::icap_vs__cloud_name
+} else {
+    set vs_name $::icap_vs__name
+}
+
 # Function to validate IPv4 address
 proc is_valid_ipv4 {ip} {
     if {[regexp {^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$} $ip -> a b c d]} {
