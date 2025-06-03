@@ -38,7 +38,7 @@ set node_name "Metadefender_ICAP_Node"
 if { [iapp::is ::icap_pool__pool_to_use "/#create_new#"] } {
     set pool_name [expr {[iapp::is ::options__default_names "No"] ? $::icap_pool__name : "Metadefender_ICAP_Pool"}]
     set monitor [expr {[iapp::is ::icap_pool_monitor__monitor "/#none#"] ? "none" : $::icap_pool_monitor__monitor}]
-} elseif { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } { #The second option is on-cloud
+} elseif { [iapp::is ::icap_pool__pool_to_use "/#create_new_icap_cloud#"] } { #The second option is on-cloud
     set pool_name [expr {[iapp::is ::options__default_names "No"] ? $::icap_pool__cloud_name : "Metadefender_ICAP_Cloud_Pool"}]
     set monitor [expr {[iapp::is ::icap_cloud_pool_monitor__monitor "/#none#"] ? "none" : $::icap_cloud_pool_monitor__monitor}]
 }
@@ -72,7 +72,7 @@ proc is_valid_ipv4 {ip} {
 iapp::conf create ltm profile icap $profile_name defaults-from icap preview-length 0 uri \"icap://\${SERVER_IP}:\${SERVER_PORT}/metadefender_icap\"
 if { [iapp::is ::icap_pool__pool_to_use "/#create_new#"] } {
     iapp::conf create ltm pool $pool_name [iapp::pool_members $::icap_pool__members] monitor $monitor
-} elseif { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
+} elseif { [iapp::is ::icap_pool__pool_to_use "/#create_new_icap_cloud#"] } {
     set cloud_apikey $::icap_vs__cloud_apikey
     set vs_name $::icap_vs__cloud_name
     iapp::conf create ltm rule $irule_name [subst {
@@ -96,12 +96,12 @@ if { [iapp::is ::icap_pool__pool_to_use "/#create_new#"] } {
     }
 }
 
-if { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
+if { [iapp::is ::icap_pool__pool_to_use "/#create_new_icap_cloud#"] } {
     iapp::conf create ltm virtual $vs_name internal profiles add \{tcp \{\} $profile_name \{\} serverssl \{\} \} pool $pool_name
 } else {
     iapp::conf create ltm virtual $vs_name internal profiles add \{tcp \{\} $profile_name \{\} \} pool $pool_name
 }
-if { [iapp::is ::icap_pool__pool_to_use "/#use_icap_cloud#"] } {
+if { [iapp::is ::icap_pool__pool_to_use "/#create_new_icap_cloud#"] } {
     iapp::conf modify ltm virtual $vs_name \{ rules \{$irule_name\} \}
 }
 iapp::conf create ltm profile request-adapt $req_name defaults-from requestadapt preview-size 0 internal-virtual $vs_name service-down-action $req_sda
@@ -164,7 +164,7 @@ section irule {
 section icap_pool {
     choice pool_to_use display "xxlarge" default "/#create_new#" tcl {
         package require iapp 1.1.1
-        return "Create a new pool\t/#create_new#\nUse the ICAP Cloud\t/#use_icap_cloud#\n[iapp::get_items ltm pool]"
+        return "Create a new pool\t/#create_new#\nCreate a new ICAP Cloud pool\t/#create_new_icap_cloud#\n[iapp::get_items ltm pool]"
     }
     optional (options.inline_help == "Yes") {
         message pool_help
@@ -185,7 +185,7 @@ section icap_pool {
             message new_pool_help
         }
     }
-    optional (pool_to_use == "/#use_icap_cloud#") {
+    optional (pool_to_use == "/#create_new_icap_cloud#") {
         optional (options.default_names == "No") {
             string cloud_name default "Metadefender_ICAP_Cloud_Pool" display "xlarge" required
         }
@@ -217,9 +217,9 @@ optional (icap_pool.pool_to_use == "/#create_new#" ) {
     }
 }
 
-optional (icap_pool.pool_to_use == "/#use_icap_cloud#" ) {
+optional (icap_pool.pool_to_use == "/#create_new_icap_cloud#" ) {
     section icap_cloud_pool_monitor {
-        choice monitor display "xxlarge" default "/#use_icap_cloud#" tcl {
+        choice monitor display "xxlarge" default "/#create_new_icap_cloud#" tcl {
             package require iapp 1.1.1
             set choices "Do not use monitor\t/#none#\n"
             append choices "[iapp::get_items ltm monitor tcp]\n"
